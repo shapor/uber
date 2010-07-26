@@ -42,10 +42,11 @@ INCLUDES =								\
 	$(NULL)
 
 OBJECTS =								\
-	uber-graph.o							\
 	uber-buffer.o							\
-	uber-label.o							\
+	uber-graph.o							\
 	uber-heat-map.o							\
+	uber-label.o							\
+	uber-parse.o							\
 	g-ring.o							\
 	main.o								\
 	$(NULL)

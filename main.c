@@ -40,10 +40,11 @@
 #include <sys/sysinfo.h>
 #include <signal.h>
 
-#include "uber-graph.h"
-#include "uber-label.h"
 #include "uber-buffer.h"
+#include "uber-graph.h"
 #include "uber-heat-map.h"
+#include "uber-label.h"
+#include "uber-parse.h"
 
 #ifdef DISABLE_DEBUG
 #define DEBUG(f,...)
@@ -466,75 +467,51 @@ next_net (void)
 	lastTotalIn = totalIn;
 }
 
+enum mem_en {
+	TOTAL_K,
+	FREE_K,
+	CACHED_K,
+	SWAPTOTAL_K,
+	SWAPFREE_K,
+	MEM_NUM_INTS
+};
+
+static void
+mem_callback (parse_data_t *pd)
+{
+	gdouble memTotal = pd->int_data[TOTAL_K];
+	gdouble memFree = pd->int_data[FREE_K];
+	gdouble cached = pd->int_data[CACHED_K];
+	gdouble swapTotal = pd->int_data[SWAPTOTAL_K];
+	gdouble swapFree = pd->int_data[SWAPFREE_K];
+
+	mem_info.memFree = (memTotal - cached - memFree) / memTotal;
+	mem_info.swapFree = (swapTotal - swapFree) / swapTotal;
+}
+
+parse_config_t mem_config = {
+	.state_steps = { INT_STATE, SKIP_CHARS_STATE, INT_STATE, SKIP_CHARS_STATE, INT_STATE, SKIP_CHARS_STATE, INT_STATE, SKIP_CHARS_STATE, INT_STATE, END_STATE },
+	.skip_chars = { ':', ':', ':', ':' },
+	.skip_chars_count = { 1, 2, 14, 1 },
+	.callback = &mem_callback
+};
+
+parse_data_t mem_parse = {
+	.config = &mem_config
+};
+
 static void
 next_mem (void)
 {
-	static gboolean initialized = FALSE;
-
-	gdouble memTotal = 0;
-	gdouble memFree = 0;
-	gdouble swapTotal = 0;
-	gdouble swapFree = 0;
-	gdouble cached = 0;
-	int fd;
-	char buf[4096];
-	char *line;
-	int i;
-
-
-	if ((fd = open("/proc/meminfo", O_RDONLY)) < 0) {
+	if ((mem_parse.fd = open("/proc/meminfo", O_RDONLY)) < 0) {
 		g_warning("Failed to open /proc/meminfo");
 		return;
 	}
 
-	read(fd, buf, sizeof(buf));
-	buf[sizeof(buf) - 1] = '\0';
-	line = buf;
+	update_data_from_fd(&mem_parse);
 
-	for (i = 0; buf[i]; i++) {
-		if (buf[i] == '\n') {
-			buf[i] = '\0';
-			if (g_str_has_prefix(line, "MemTotal:")) {
-				if (sscanf(line, "MemTotal: %lf", &memTotal) != 1) {
-					g_warning("Failed to read MemTotal");
-					goto error;
-				}
-			} else if (g_str_has_prefix(line, "MemFree:")) {
-				if (sscanf(line, "MemFree: %lf", &memFree) != 1) {
-					g_warning("Failed to read MemFree");
-					goto error;
-				}
-			} else if (g_str_has_prefix(line, "SwapTotal:")) {
-				if (sscanf(line, "SwapTotal: %lf", &swapTotal) != 1) {
-					g_warning("Failed to read SwapTotal");
-					goto error;
-				}
-			} else if (g_str_has_prefix(line, "SwapFree:")) {
-				if (sscanf(line, "SwapFree: %lf", &swapFree) != 1) {
-					g_warning("Failed to read SwapFree");
-					goto error;
-				}
-			} else if (g_str_has_prefix(line, "Cached:")) {
-				if (sscanf(line, "Cached: %lf", &cached) != 1) {
-					g_warning("Failed to read Cached");
-					goto error;
-				}
-			}
-			line = &buf[i + 1];
-		}
-	}
-
-	if (!initialized) {
-		initialized = TRUE;
-		goto finish;
-	}
-
-	mem_info.memFree = (memTotal - cached - memFree) / memTotal;
-	mem_info.swapFree = (swapTotal - swapFree) / swapTotal;
-
-  finish:
-  error:
-  	close(fd);
+	// TODO FIXME(shapor): don't close the fd, just seek(0)
+	close(mem_parse.fd);
 }
 
 static void
